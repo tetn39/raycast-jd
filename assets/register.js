@@ -136,6 +136,18 @@ function hasPair(root, reading, word) {
     return values.indexOf(reading) !== -1 && values.indexOf(word) !== -1;
   });
 }
+function closeSettings(dictionary, process, settings) {
+  try {
+    var done = onlyButton(dictionary, ["完了", "Done"]);
+    if (!done || !value(done, "AXEnabled")) throw new Error("辞書画面の完了ボタンを特定できません。");
+    click(done);
+    waitFor(function () { return sheets(process).length === 0; }, "辞書画面が閉じませんでした。");
+    settings.quit();
+    waitFor(function () { return !settings.running(); }, "システム設定が終了しませんでした。");
+  } catch (error) {
+    throw new Error("単語の登録は確認済みですが、画面を閉じられませんでした。" + error.message);
+  }
+}
 function run(argv) {
   if (argv.length !== 2 || !argv[0].trim() || !argv[1].trim()) {
     throw new Error("読みと単語を指定してください。");
@@ -175,7 +187,10 @@ function run(argv) {
     if (button) { click(button); openedDictionary = true; return null; }
     return null;
   }, "ユーザ辞書画面を特定できません。標準日本語入力を選び、ユーザ辞書を手動で開いて再実行してください。");
-  if (hasPair(dictionary, reading, word)) return "EXISTS";
+  if (hasPair(dictionary, reading, word)) {
+    closeSettings(dictionary, process, settings);
+    return "EXISTS";
+  }
   var add = onlyButton(dictionary, ["追加", "追加ボタン", "Add", "Add button", "+"]);
   if (!add) throw new Error("辞書の追加ボタンを一意に特定できません。単語は登録していません。");
   click(add);
@@ -201,5 +216,6 @@ function run(argv) {
   waitFor(function () {
     return sheets(process).some(function (sheet) { return hasPair(sheet, reading, word); });
   }, "追加操作後、登録行を確認できませんでした。保存されている可能性があるため、ユーザ辞書を確認してから再実行してください。");
+  closeSettings(dictionary, process, settings);
   return "REGISTERED";
 }
