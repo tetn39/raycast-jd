@@ -1,24 +1,99 @@
 // Run with: /usr/bin/osascript -l JavaScript register.js READING WORD
 // Uses only macOS GUI automation; never edits dictionary databases directly.
 ObjC.import("ApplicationServices");
+ObjC.import("AppKit");
 
-function safe(fn, fallback) {
-  try { return fn(); } catch (_) { return fallback; }
+function attribute(element, name) {
+  var result = Ref();
+  if ($.AXUIElementCopyAttributeValue(element, $(name), result) !== 0) return null;
+  return ObjC.castRefToObject(result[0]);
+}
+function value(element, name) {
+  var result = attribute(element, name);
+  return result ? ObjC.unwrap(result) : null;
+}
+function children(element, name) {
+  var array = attribute(element, name || "AXChildren"), result = [];
+  if (array) for (var i = 0; i < array.count; i++) result.push(array.objectAtIndex(i));
+  return result;
 }
 function contents(element) {
-  return [element].concat(safe(function () { return element.entireContents(); }, []));
+  var result = [element];
+  children(element).forEach(function (child) { result = result.concat(contents(child)); });
+  return result;
 }
-function role(element) { return safe(function () { return element.role(); }, ""); }
+function role(element) { return value(element, "AXRole"); }
 function strings(element) {
-  return [safe(function () { return element.name(); }, ""),
-    safe(function () { return element.description(); }, ""),
-    safe(function () { return element.value(); }, "")].filter(function (x) { return typeof x === "string"; });
+  // System Events omits SwiftUI button labels on current macOS versions.
+  return ["AXTitle", "AXDescription", "AXValue"].map(function (name) {
+    return value(element, name);
+  }).filter(function (x) { return typeof x === "string"; });
+}
+function click(element) {
+  if ($.AXUIElementPerformAction(element, $("AXPress")) !== 0) {
+    throw new Error("ボタンを操作できませんでした。ユーザ辞書を確認してください。");
+  }
+}
+function pasteValue(element, text, clipboard) {
+  var pid = Ref();
+  if ($.AXUIElementGetPid(element, pid) !== 0 ||
+      $.AXUIElementSetAttributeValue(element, $("AXFocused"), $(true)) !== 0) {
+    throw new Error("入力欄を操作できません。追加画面をキャンセルしてください。単語は保存していません。");
+  }
+  waitFor(function () { return value(element, "AXFocused"); }, "入力欄にフォーカスできません。");
+  function shortcut(key) {
+    if ($.NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier !== pid[0]) {
+      throw new Error("システム設定からフォーカスが移りました。追加画面をキャンセルして再実行してください。");
+    }
+    [true, false].forEach(function (down) {
+      var event = $.CGEventCreateKeyboardEvent(null, key, down);
+      $.CGEventSetFlags(event, $.kCGEventFlagMaskCommand);
+      $.CGEventPost($.kCGHIDEventTap, event);
+    });
+  }
+  var pasteboard = clipboard.pasteboard;
+  pasteboard.clearContents;
+  var prepared = pasteboard.setStringForType($(text), $.NSPasteboardTypeString);
+  clipboard.changeCount = pasteboard.changeCount;
+  if (!prepared) throw new Error("入力用のテキストを準備できませんでした。単語は保存していません。");
+  shortcut(0); // Command-A
+  delay(0.15);
+  shortcut(9); // Command-V triggers SwiftUI's editing state, unlike AXValue.
+  delay(0.15);
+  waitFor(function () { return value(element, "AXValue") === text; }, "入力値を確認できません。追加画面をキャンセルしてください。");
+}
+function fillFields(fields, reading, word) {
+  var pasteboard = $.NSPasteboard.generalPasteboard;
+  var originals = pasteboard.pasteboardItems, saved = [];
+  if (originals) for (var i = 0; i < originals.count; i++) {
+    var original = originals.objectAtIndex(i), copy = $.NSPasteboardItem.alloc.init;
+    var types = original.types;
+    for (var j = 0; j < types.count; j++) {
+      var type = types.objectAtIndex(j), data = original.dataForType(type);
+      if (!data || !copy.setDataForType(data, type)) {
+        throw new Error("クリップボードを保持できないため、入力を中止しました。");
+      }
+    }
+    saved.push(copy);
+  }
+  var clipboard = { pasteboard: pasteboard, changeCount: pasteboard.changeCount };
+  try {
+    pasteValue(fields.reading, reading, clipboard);
+    pasteValue(fields.word, word, clipboard);
+  } finally {
+    // Restore every original format; don't overwrite a user's intervening copy.
+    if (pasteboard.changeCount === clipboard.changeCount) {
+      pasteboard.clearContents;
+      if (saved.length) pasteboard.writeObjects($(saved));
+    }
+  }
 }
 function matches(element, labels) {
   return strings(element).some(function (x) { return labels.indexOf(x) !== -1; });
 }
 function waitFor(find, message) {
-  for (var i = 0; i < 60; i++) {
+  var deadline = Date.now() + 9000;
+  while (Date.now() < deadline) {
     var result = find();
     if (result) return result;
     delay(0.15);
@@ -33,7 +108,7 @@ function onlyButton(root, labels) {
 }
 function sheets(process) {
   var result = [];
-  process.windows().forEach(function (window) {
+  children(process, "AXWindows").forEach(function (window) {
     contents(window).forEach(function (x) {
       if (role(x) === "AXSheet") result.push(x);
     });
@@ -42,7 +117,7 @@ function sheets(process) {
 }
 function fieldLabels(field) {
   var result = strings(field);
-  var title = safe(function () { return field.attributes.byName("AXTitleUIElement").value(); }, null);
+  var title = attribute(field, "AXTitleUIElement");
   if (title) result = result.concat(strings(title));
   return result;
 }
@@ -78,27 +153,32 @@ function run(argv) {
   app.openLocation("x-apple.systempreferences:com.apple.Keyboard-Settings.extension");
   var settings = Application("com.apple.systempreferences");
   settings.activate();
-  var events = Application("System Events");
   var process = waitFor(function () {
-    var p = events.processes.byName("System Settings");
-    return safe(function () { return p.exists() && p.windows().length ? p : null; }, null);
+    var apps = $.NSRunningApplication.runningApplicationsWithBundleIdentifier($("com.apple.systempreferences"));
+    if (!apps.count) return null;
+    var p = $.AXUIElementCreateApplication(apps.objectAtIndex(0).processIdentifier);
+    return children(p, "AXWindows").length ? p : null;
   }, "システム設定を開けませんでした。");
   var dictionaryLabels = ["ユーザ辞書…", "ユーザ辞書...", "ユーザ辞書", "ユーザ辞書を編集", "テキスト置換…", "テキスト置換...", "テキスト置換", "Text Replacements…", "Text Replacements...", "Text Replacements", "User Dictionary…", "User Dictionary"];
   var openedDictionary = false;
   var dictionary = waitFor(function () {
     var current = sheets(process);
     for (var i = 0; i < current.length; i++) {
-      if (contents(current[i]).some(function (x) { return matches(x, dictionaryLabels); })) return current[i];
+      var elements = contents(current[i]);
+      var hasReading = elements.some(function (x) { return matches(x, ["入力/読み", "入力／読み", "Replace", "置換"]); });
+      var hasWord = elements.some(function (x) { return matches(x, ["変換/語句", "変換／語句", "With", "入力"]); });
+      // The dictionary sheet has column headers, but no dictionary title.
+      if (hasReading && hasWord && elements.some(function (x) { return role(x) === "AXOutline" || role(x) === "AXTable"; })) return current[i];
     }
-    var window = process.windows()[0];
+    var window = children(process, "AXWindows")[0];
     var button = openedDictionary ? null : onlyButton(window, dictionaryLabels);
-    if (button) { button.click(); openedDictionary = true; return null; }
+    if (button) { click(button); openedDictionary = true; return null; }
     return null;
   }, "ユーザ辞書画面を特定できません。標準日本語入力を選び、ユーザ辞書を手動で開いて再実行してください。");
   if (hasPair(dictionary, reading, word)) return "EXISTS";
   var add = onlyButton(dictionary, ["追加", "追加ボタン", "Add", "Add button", "+"]);
   if (!add) throw new Error("辞書の追加ボタンを一意に特定できません。単語は登録していません。");
-  add.click();
+  click(add);
   var fields = waitFor(function () {
     var dialogs = sheets(process);
     // Prefer the innermost sheet. Labels are mandatory; never guess field order.
@@ -109,16 +189,15 @@ function run(argv) {
     }
     return null;
   }, "読み・単語の欄をラベルで特定できません。追加画面をキャンセルしてください。単語は保存していません。");
-  fields.reading.value = reading;
-  fields.word.value = word;
-  if (fields.reading.value() !== reading || fields.word.value() !== word) {
+  fillFields(fields, reading, word);
+  if (value(fields.reading, "AXValue") !== reading || value(fields.word, "AXValue") !== word) {
     throw new Error("入力値を確認できません。追加画面をキャンセルしてください。単語は保存していません。");
   }
-  var save = onlyButton(fields.root, ["追加", "Add"]);
-  if (!save || !safe(function () { return save.enabled(); }, false)) {
-    throw new Error("追加確定ボタンを特定できません。追加画面をキャンセルしてください。単語は保存していません。");
-  }
-  save.click();
+  var save = waitFor(function () {
+    var button = onlyButton(fields.root, ["追加", "Add"]);
+    return button && value(button, "AXEnabled") ? button : null;
+  }, "追加確定ボタンを特定できません。追加画面をキャンセルしてください。単語は保存していません。");
+  click(save);
   waitFor(function () {
     return sheets(process).some(function (sheet) { return hasPair(sheet, reading, word); });
   }, "追加操作後、登録行を確認できませんでした。保存されている可能性があるため、ユーザ辞書を確認してから再実行してください。");
