@@ -1,14 +1,19 @@
 # 日本語ユーザ辞書 — Raycast拡張機能
 
+Raycastで簡単にMacの辞書登録をしたい
+
 ## できること
 
-Raycastで「読み」と「単語」を入力し、EnterでMac標準の日本語ユーザ辞書に登録できます。
-`jd`を設定すると、Raycastを開く → `jd` → Enterですぐに登録画面を開けます。
+Raycastで「読み」と「単語」を入力するとMac標準の日本語ユーザ辞書に登録できる
 
-## セットアップ
+aliasで`jd` (Japanese Dictionary)を設定すると、Raycastで`jd`と入れるだけですぐ開き、単語登録可能
 
-1. Macに [Raycast](https://www.raycast.com/) と [Node.js（LTS）](https://nodejs.org/) をインストールします。
-2. ターミナルで次を実行します（初回のみ）。
+マウス操作は無し
+
+## 導入
+
+1. Macに [Raycast](https://www.raycast.com/) と [Node.js（LTS）](https://nodejs.org/) をインストール
+2. ターミナルで次を実行
 
    ```sh
    git clone https://github.com/tetn39/raycast-jd.git
@@ -17,18 +22,13 @@ Raycastで「読み」と「単語」を入力し、EnterでMac標準の日本�
    npm run dev
    ```
 
-   `built extension successfully` が表示されたら、ターミナルは開いたままにします。
-
-3. Raycast Settings → Extensions → 日本語ユーザ辞書 → 辞書登録を開き、**Alias** に `jd` を設定します。
-4. システム設定 → プライバシーとセキュリティ → アクセシビリティで **Raycastを許可**します。System Eventsへの操作許可を求められた場合も許可します。
+   `built extension successfully` が表示されたら、OK
+3. Raycast Settings → Extensions → 日本語ユーザ辞書 → 辞書登録を開き、**Alias** に `jd` を設定
+4. システム設定 → プライバシーとセキュリティ → アクセシビリティで **Raycastを許可**。System Eventsへの操作許可を求められた場合も許可。
 
 ## 使い方
 
-1. Mac標準の日本語入力に切り替えます。Google日本語入力・ATOKは対象外です。
-2. Raycastを開き、`jd` → Enterを押します。
-3. 「読み」をひらがなで入力します（32文字以内）。
-4. Tabを押し、「単語」を入力します（64文字以内）。
-5. 日本語変換を確定してから、Enterを押して登録します。登録中はシステム設定が前面に出ます。
-6. 登録した読みを入力し、日本語変換の候補に単語が出ることを確認します。
+1. Raycastを開き、`jd` → Enter
+2. 「読み」と「単語」を入力
+3. Command + Enterで登録可能
 
-登録後にエラーが出た場合は、再実行する前にユーザ辞書に登録済みか確認してください。
