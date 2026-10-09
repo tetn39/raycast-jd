@@ -1,66 +1,68 @@
-import { Action, ActionPanel, Form, Toast, environment, showHUD, showToast } from "@raycast/api";
+import { Action, ActionPanel, Form, PopToRootType, Toast, closeMainWindow, environment, showHUD, showToast } from "@raycast/api";
+import { useRef, useState } from "react";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { useRef, useState } from "react";
 
 const execute = promisify(execFile);
 
-export default function RegisterDictionary() {
-  const [reading, setReading] = useState("");
-  const [word, setWord] = useState("");
-  const [errors, setErrors] = useState<{ reading?: string; word?: string }>({});
-  const [busy, setBusy] = useState(false);
-  const submitting = useRef(false);
+type Values = { reading: string; word: string };
 
-  async function submit(values: { reading: string; word: string }) {
+export default function RegisterDictionary() {
+  const submitting = useRef(false);
+  const [loading, setLoading] = useState(false);
+  const [readingError, setReadingError] = useState<string>();
+  const [wordError, setWordError] = useState<string>();
+
+  async function submit(values: Values) {
     if (submitting.current) return;
-    const r = values.reading.trim();
-    const w = values.word.trim();
-    const next: typeof errors = {};
-    if (!r) next.reading = "読みを入力してください";
-    else if (!/^[ぁ-ゖー]+$/.test(r) || Array.from(r).length > 32)
-      next.reading = "ひらがなで32文字以内にしてください";
-    if (!w) next.word = "単語を入力してください";
-    else if (Array.from(w).length > 64 || /[\r\n\t]/.test(w))
-      next.word = "改行・タブなしで64文字以内にしてください";
-    setErrors(next);
-    if (next.reading || next.word) return;
+    const reading = values.reading.trim();
+    const word = values.word;
+    setReadingError(reading ? undefined : "読みを入力してください");
+    setWordError(word.trim() ? undefined : "単語を入力してください");
+    if (!reading || !word.trim()) return;
 
     submitting.current = true;
-    setBusy(true);
-    const toast = await showToast({ style: Toast.Style.Animated, title: "ユーザ辞書に登録中" });
+    setLoading(true);
     try {
-      // Arguments are passed separately, never interpolated into executable code.
-      const { stdout } = await execute("/usr/bin/osascript", [
-        "-l", "JavaScript", join(environment.assetsPath, "register.js"), r, w,
-      ], { timeout: 60_000, maxBuffer: 128 * 1024 });
+      // Start the subprocess before resetting the view so registration stays alive.
+      const registration = execute("/usr/bin/osascript", [
+        "-l", "JavaScript", join(environment.assetsPath, "register.js"), reading, word,
+      ], { maxBuffer: 128 * 1024 });
+      await closeMainWindow({ clearRootSearch: true, popToRootType: PopToRootType.Immediate });
+      const { stdout } = await registration;
       const result = stdout.trim();
-      if (result !== "REGISTERED" && result !== "EXISTS")
+      if (result === "REGISTERED") {
+        await showHUD("ユーザ辞書に登録しました");
+      } else if (result === "EXISTS") {
+        await showHUD("この読み・単語は登録済みです");
+      } else {
         throw new Error("登録結果を確認できません。ユーザ辞書を確認してください。");
-      toast.hide();
-      await showHUD(result === "EXISTS" ? "同じ読み・単語は登録済みです" : `登録しました：${r} → ${w}`);
+      }
     } catch (error) {
-      toast.style = Toast.Style.Failure;
-      toast.title = "登録を完了できませんでした";
-      const failure = error as Error & { stderr?: string; killed?: boolean };
-      toast.message = failure.killed
-        ? "処理がタイムアウトしました。登録済みの可能性があるためユーザ辞書を確認してください。"
-        : failure.stderr?.trim() || failure.message;
+      const failure = error as Error & { stderr?: string };
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "辞書操作を完了できませんでした",
+        message: failure.stderr?.trim() || failure.message,
+      });
     } finally {
       submitting.current = false;
-      setBusy(false);
+      setLoading(false);
     }
   }
 
   return (
-    <Form navigationTitle="辞書登録" isLoading={busy} actions={
-      <ActionPanel><Action.SubmitForm title="登録" onSubmit={submit} /></ActionPanel>
-    }>
-      <Form.TextField id="reading" title="読み" placeholder="おんぷ" value={reading}
-        error={errors.reading} onChange={(value) => { setReading(value); setErrors((old) => ({ ...old, reading: undefined })); }} autoFocus />
-      <Form.TextField id="word" title="単語" placeholder="omp" value={word}
-        error={errors.word} onChange={(value) => { setWord(value); setErrors((old) => ({ ...old, word: undefined })); }} />
+    <Form
+      isLoading={loading}
+      actions={
+        <ActionPanel>
+          <Action.SubmitForm title="辞書に登録" onSubmit={submit} />
+        </ActionPanel>
+      }
+    >
+      <Form.TextField id="reading" title="読み" error={readingError} onChange={() => setReadingError(undefined)} />
+      <Form.TextField id="word" title="単語" error={wordError} onChange={() => setWordError(undefined)} />
     </Form>
   );
 }
