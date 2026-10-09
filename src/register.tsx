@@ -1,4 +1,4 @@
-import { Action, ActionPanel, Form, Toast, closeMainWindow, environment, showHUD, showToast } from "@raycast/api";
+import { Action, ActionPanel, Form, PopToRootType, Toast, closeMainWindow, environment, showHUD, showToast } from "@raycast/api";
 import { useRef, useState } from "react";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
@@ -25,10 +25,12 @@ export default function RegisterDictionary() {
     submitting.current = true;
     setLoading(true);
     try {
-      await closeMainWindow();
-      const { stdout } = await execute("/usr/bin/osascript", [
+      // Start the subprocess before resetting the view so registration stays alive.
+      const registration = execute("/usr/bin/osascript", [
         "-l", "JavaScript", join(environment.assetsPath, "register.js"), reading, word,
       ], { maxBuffer: 128 * 1024 });
+      await closeMainWindow({ clearRootSearch: true, popToRootType: PopToRootType.Immediate });
+      const { stdout } = await registration;
       const result = stdout.trim();
       if (result === "REGISTERED") {
         await showHUD("ユーザ辞書に登録しました");
@@ -59,7 +61,6 @@ export default function RegisterDictionary() {
         </ActionPanel>
       }
     >
-      <Form.Description text="設定の追加画面を開いた後、非表示で登録します。最初だけ設定画面が表示されます。" />
       <Form.TextField id="reading" title="読み" error={readingError} onChange={() => setReadingError(undefined)} />
       <Form.TextField id="word" title="単語" error={wordError} onChange={() => setWordError(undefined)} />
     </Form>
