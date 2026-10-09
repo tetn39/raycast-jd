@@ -8,7 +8,7 @@
   "platforms": ["macOS"],
   "categories": ["Productivity"],
   "license": "MIT",
-  "commands": [{ "name": "register", "title": "辞書登録", "description": "読みと単語を入力してMacのユーザ辞書に登録します。", "mode": "view", "keywords": ["jd", "辞書", "単語登録"] }],
+  "commands": [{ "name": "register", "title": "辞書登録", "description": "Macのユーザ辞書の追加画面を開き、登録後にシステム設定を閉じます。", "mode": "no-view", "keywords": ["jd", "辞書", "単語登録"] }],
   "scripts": { "setup": "node scripts/setup.mjs", "dev": "ray develop", "build": "ray build", "typecheck": "tsc --noEmit" },
   "dependencies": { "@raycast/api": "^1.103.0", "react": "^19.0.0" },
   "devDependencies": { "@types/node": "^22.0.0", "@types/react": "^19.0.0", "typescript": "^5.8.0" }
